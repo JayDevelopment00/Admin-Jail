@@ -1,20 +1,18 @@
-local framework = nil
+local ESX, QBCore
 
 if GetResourceState("es_extended") == "started" then
-    framework = "esx"
+    ESX = exports['es_extended']:getSharedObject()
 elseif GetResourceState("qb-core") == "started" then
-    framework = "qbcore"
-else
-    print("No framework detected")
+    QBCore = exports['qb-core']:GetCoreObject()
 end
 
-if framework == "esx" then
+if ESX then
     Citizen.CreateThread(function()
         while true do
             Citizen.Wait(1000)
         end
     end)
-elseif framework == "qbcore" then
+elseif QBCore then
     RegisterNetEvent('QBCore:Client:OnPlayerLoaded')
     AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
         while true do
