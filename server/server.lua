@@ -1,48 +1,45 @@
-local framework = esx
+local ESX, QBCore
+local jailedPlayers = {}
 
 if GetResourceState("es_extended") == "started" then
-    framework = "esx"
     ESX = exports['es_extended']:getSharedObject()
 elseif GetResourceState("qb-core") == "started" then
-    framework = "qbcore"
     QBCore = exports['qb-core']:GetCoreObject()
-else
-    print("No framework detected")
 end
 
-function getPlayerData(source)
-    if framework == "esx" then
+local function getPlayerData(source)
+    if ESX then
         local xPlayer = ESX.GetPlayerFromId(source)
-        return {
+        return xPlayer and {
             identifier = xPlayer.identifier,
             job = xPlayer.job.name,
         }
-    elseif framework == "qbcore" then
+    elseif QBCore then
         local Player = QBCore.Functions.GetPlayer(source)
-        return {
+        return Player and {
             identifier = Player.PlayerData.citizenid,
             job = Player.PlayerData.job.name,
         }
-    else
-        return nil
     end
+    return nil
 end
 
-if framework == "esx" then
+if ESX then
     AddEventHandler('esx:playerLoaded', function(source)
         local playerData = getPlayerData(source)
-        print("Player loaded with ESX: " .. playerData.identifier)
+        if playerData then
+            print("Player loaded with ESX: " .. playerData.identifier)
+        end
     end)
-elseif framework == "qbcore" then
+elseif QBCore then
     RegisterNetEvent('QBCore:Client:OnPlayerLoaded')
     AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
-        local source = source
         local playerData = getPlayerData(source)
-        print("Player loaded with QBCore: " .. playerData.identifier)
+        if playerData then
+            print("Player loaded with QBCore: " .. playerData.identifier)
+        end
     end)
 end
-
-local jailedPlayers = {}
 
 local function FreezePlayer(playerId)
     TriggerClientEvent('adminjail:freezePlayer', playerId)
@@ -67,71 +64,79 @@ local function StartJailTimer(playerId, time)
     }
 end
 
-function CancelJailTimer(playerId)
+local function CancelJailTimer(playerId)
     if jailedPlayers[playerId] and jailedPlayers[playerId].timer then
         ClearTimeout(jailedPlayers[playerId].timer)
         jailedPlayers[playerId] = nil
     end
 end
 
-ESX.RegisterCommand('adminjail', 'admin', function(xPlayer, args, showError)
-    if args.playerId and args.time and args.reason then
-        local targetPlayer = ESX.GetPlayerFromId(args.playerId)
-        if targetPlayer then
-            FreezePlayer(args.playerId)
-
-            StartJailTimer(args.playerId, tonumber(args.time))
-
-            TriggerClientEvent('adminjail:teleportToJail', args.playerId)
-            
-            local targetName = targetPlayer.getName()
-            local adminName = xPlayer.getName()
-            local time = tonumber(args.time)
-            local reason = args.reason
-
-            local timeText
-            if time == 1 then
-                timeText = time .. " minute"
-            else
-                timeText = time .. " minutes"
-            end
-
-            local message = "" .. targetName .. " was admin jailed by " .. adminName .. " for " .. timeText .. ". Reason: " .. reason
-
-            TriggerClientEvent('chat:addMessage', -1, {
-                template = '<div style="color: rgba(255, 99, 71, 1); width: fit-content; max-width: 125%; overflow: hidden; word-break: break-word; "><b>AdmCmd: {0}</b></div>',
-                args = { message }
-            })
-
-            TriggerClientEvent('ox_lib:notify', xPlayer.source, { type = 'success', description = 'Player admin jailed successfully.' })
-        else
-            TriggerClientEvent('ox_lib:notify', xPlayer.source, { type = 'error', description = 'Player not found.' })
+local function getPlayerDetails(source, playerId)
+    local adminName, targetName
+    if ESX then
+        local xPlayer = ESX.GetPlayerFromId(source)
+        local targetPlayer = ESX.GetPlayerFromId(playerId)
+        if xPlayer and targetPlayer then
+            adminName = xPlayer.getName()
+            targetName = targetPlayer.getName()
+            return adminName, targetName, targetPlayer
         end
-    else
-        TriggerClientEvent('ox_lib:notify', xPlayer.source, { type = 'error', description = 'Invalid parameters. Usage: /adminjail <playerId> <time> <reason>' })
-    end
-end, true, { help = 'Jail a player', validate = true, arguments = {
-    { name = 'playerId', help = 'ID of the player', type = 'number' },
-    { name = 'time', help = 'Jail time in minutes', type = 'number' },
-    { name = 'reason', help = 'Reason for jailing', type = 'string' }
-}})
-
-ESX.RegisterCommand('adminjailrelease', 'admin', function(xPlayer, args, showError)
-    if args.playerId then
-        local targetPlayer = ESX.GetPlayerFromId(args.playerId)
-        if targetPlayer then
-            CancelJailTimer(args.playerId)
-            UnfreezePlayer(args.playerId)
-            
-            TriggerClientEvent('adminjail:releaseFromJail', args.playerId)
-            
-            TriggerClientEvent('ox_lib:notify', xPlayer.source, { type = 'success', description = 'Player released from admin jail.' })
-        else
-            TriggerClientEvent('ox_lib:notify', xPlayer.source, { type = 'error', description = 'Player not found.' })
+    elseif QBCore then
+        local xPlayer = QBCore.Functions.GetPlayer(source)
+        local targetPlayer = QBCore.Functions.GetPlayer(playerId)
+        if xPlayer and targetPlayer then
+            adminName = xPlayer.PlayerData.charinfo.firstname .. " " .. xPlayer.PlayerData.charinfo.lastname
+            targetName = targetPlayer.PlayerData.charinfo.firstname .. " " .. targetPlayer.PlayerData.charinfo.lastname
+            return adminName, targetName, targetPlayer
         end
-    else
-        TriggerClientEvent('ox_lib:notify', xPlayer.source, { type = 'error', description = 'Invalid parameters.' })
     end
-end, true, { help = 'Release a player from jail', validate = true, arguments = {
-    { name = 'playerId', help = 'ID of the player', type = 'number' }
-}})
+    return nil, nil, nil
+end
+
+RegisterCommand('adminjail', function(source, args, rawCommand)
+    local playerId, time = tonumber(args[1]), tonumber(args[2])
+    local reason = table.concat(args, ' ', 3)
+
+    if not playerId or not time or not reason then
+        TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = 'Invalid parameters. Usage: /adminjail <id> <time> <reason>', icon = 'building' })
+        return
+    end
+
+    local adminName, targetName, targetPlayer = getPlayerDetails(source, playerId)
+    if not targetPlayer then
+        TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = 'Player not found.', icon = 'building' })
+        return
+    end
+
+    FreezePlayer(playerId)
+    StartJailTimer(playerId, time)
+    TriggerClientEvent('adminjail:teleportToJail', playerId)
+
+    local message = string.format("%s was admin jailed by %s for %d minute(s). Reason: %s", targetName, adminName, time, reason)
+    TriggerClientEvent('chat:addMessage', -1, {
+        template = '<div style="color: rgba(255, 99, 71, 1); width: fit-content; max-width: 125%; overflow: hidden; word-break: break-word;"><b>AdmCmd: {0}</b></div>',
+        args = { message }
+    })
+
+    TriggerClientEvent('ox_lib:notify', source, { type = 'success', description = 'Player admin jailed successfully.', icon = 'building' })
+end, false)
+
+RegisterCommand('adminjailrelease', function(source, args, rawCommand)
+    local playerId = tonumber(args[1])
+    if not playerId then
+        TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = 'Invalid parameters. Usage: /adminjailrelease <playerId>', icon = 'building' })
+        return
+    end
+
+    local _, targetName, targetPlayer = getPlayerDetails(source, playerId)
+    if not targetPlayer then
+        TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = 'Player not found.', icon = 'building' })
+        return
+    end
+
+    CancelJailTimer(playerId)
+    UnfreezePlayer(playerId)
+    TriggerClientEvent('adminjail:releaseFromJail', playerId)
+
+    TriggerClientEvent('ox_lib:notify', source, { type = 'success', description = 'Player released from admin jail.', icon = 'building' })
+end, false)
