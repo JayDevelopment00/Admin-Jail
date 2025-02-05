@@ -28,7 +28,7 @@ if ESX then
     AddEventHandler('esx:playerLoaded', function(source)
         local playerData = getPlayerData(source)
         if playerData then
-            print("Player loaded with ESX: " .. playerData.identifier)
+            --print("Player loaded with ESX: " .. playerData.identifier)
         end
     end)
 elseif QBCore then
@@ -36,7 +36,7 @@ elseif QBCore then
     AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
         local playerData = getPlayerData(source)
         if playerData then
-            print("Player loaded with QBCore: " .. playerData.identifier)
+            --print("Player loaded with QBCore: " .. playerData.identifier)
         end
     end)
 end
